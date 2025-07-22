@@ -38,11 +38,4 @@ type AuthOptions struct {
 	// ApiKey allows users to authenticate (possibly as another user) with an
 	// authentication token ID.
 	APIKey string `json:"-"`
-
-	// AllowReauth should be set to true if you grant permission for Gocloudcix to
-	// cache your credentials in memory, and to allow Gocloudcix to attempt to
-	// re-authenticate automatically if/when your token expires.  If you set it to
-	// false, it will not cache these settings, but re-authentication will not be
-	// possible.  This setting defaults to false.
-	AllowReauth bool `json:"-"`
 }
