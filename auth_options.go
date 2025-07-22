@@ -13,7 +13,7 @@ provider.
 An example of manually providing authentication information:
 
 	opts := gocloudcix.AuthOptions{
-	  MembershipEndpoint: "https://membership.api.cloudcix.com/",
+	  BaseEndpoint: "https://api.cloudcix.com/",
 	  Username: "{username}",
 	  Password: "{password}",
 	  ApiKey: "{apikey}",
