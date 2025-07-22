@@ -2,7 +2,6 @@ package gocloudcix
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"maps"
 
@@ -10,7 +9,6 @@ import (
 )
 
 // ApplicationClient stores details required to interact with a specific Application API implemented by a provider.
-// Generally, you'll acquire these by calling the appropriate `New` method on a ProviderClient.
 type ApplicationClient struct {
 	// ProviderClient is a reference to the provider that implements this Application.
 	*ProviderClient
@@ -117,8 +115,6 @@ func (client *ApplicationClient) Request(ctx context.Context, method, url string
 	} else {
 		requestBody = opts.JSONBody
 	}
-
-	fmt.Print("Requesting: ", method, " ", url, " with body: ", requestBody, " and headers: ", opts.MoreHeaders)
 
 	return client.ProviderClient.Request(
 		ctx,

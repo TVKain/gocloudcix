@@ -28,9 +28,9 @@ be read from a file, such as a standard openrc file:
 	provider, err := cloudcix.AuthenticatedClient(context.TODO(), opts)
 */
 type AuthOptions struct {
-	// MembershipEndpoint specifies the HTTP endpoint that is required to work with
+	// CloudCIX API endpoint specifies the HTTP endpoint that is required to work with
 	// the Membership API.
-	MembershipEndpoint string `json:"-"`
+	BaseEndpoint string `json:"-"`
 
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`

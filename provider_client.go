@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/go-resty/resty/v2"
 )
+
+const MaxRetries = 5
 
 type ProviderClient struct {
 	BaseEndpoint string
@@ -45,7 +48,7 @@ func (e *ErrUnexpectedResponseCode) Error() string {
 func NewProviderClient(baseEndpoint string) *ProviderClient {
 	pc := &ProviderClient{
 		BaseEndpoint: baseEndpoint,
-		MaxRetries:   5,
+		MaxRetries:   MaxRetries,
 		client:       resty.New(),
 	}
 
@@ -98,16 +101,15 @@ func NewProviderClient(baseEndpoint string) *ProviderClient {
 		}
 
 		// Clone and retry the request
-		return retryWithNewToken(pc, r)
+		return retryWithNewToken(pc, r, r.Result())
 	})
 
 	return pc
 }
 
-func retryWithNewToken(pc *ProviderClient, origResp *resty.Response) error {
+func retryWithNewToken(pc *ProviderClient, origResp *resty.Response, response any) error {
 	origReq := origResp.Request
 
-	// Copy headers (convert http.Header -> map[string]string)
 	headers := map[string]string{}
 	for k, vals := range origReq.Header {
 		if len(vals) > 0 {
@@ -115,7 +117,6 @@ func retryWithNewToken(pc *ProviderClient, origResp *resty.Response) error {
 		}
 	}
 
-	// Copy query params
 	qp := map[string]string{}
 	for k, vals := range origReq.QueryParam {
 		if len(vals) > 0 {
@@ -123,7 +124,6 @@ func retryWithNewToken(pc *ProviderClient, origResp *resty.Response) error {
 		}
 	}
 
-	// Copy body (if it's reusable)
 	var bodyCopy []byte
 	if origReq.Body != nil {
 		switch b := origReq.Body.(type) {
@@ -136,7 +136,6 @@ func retryWithNewToken(pc *ProviderClient, origResp *resty.Response) error {
 			bodyCopy = make([]byte, b.Len())
 			copy(bodyCopy, b.Bytes())
 		case io.Reader:
-			// Read and buffer the body so it can be reused
 			buf, err := io.ReadAll(b)
 			if err != nil {
 				return fmt.Errorf("failed to read request body: %w", err)
@@ -145,29 +144,29 @@ func retryWithNewToken(pc *ProviderClient, origResp *resty.Response) error {
 		}
 	}
 
-	// Build new request with updated token
 	newReq := pc.client.R().
 		SetContext(origReq.Context()).
 		SetHeaders(headers).
 		SetQueryParams(qp)
 
-	// Inject updated token
 	if token := pc.getToken(); token != "" {
 		newReq.SetHeader("X-Auth-Token", token)
 	}
 
-	// Restore body if any
 	if len(bodyCopy) > 0 {
 		newReq.SetBody(bodyCopy)
 	}
 
-	// Retry request
+	// Important: Pass the same response object for unmarshaling JSON
+	if response != nil {
+		newReq.SetResult(response)
+	}
+
 	newResp, err := newReq.Execute(origReq.Method, origReq.URL)
 	if err != nil {
 		return fmt.Errorf("failed to retry request: %w", err)
 	}
 
-	// Replace original response content
 	*origResp = *newResp
 	return nil
 }
@@ -224,10 +223,8 @@ func (pc *ProviderClient) Request(
 
 	// Validate status code
 	code := resp.StatusCode()
-	for _, c := range okCodes {
-		if c == code {
-			return resp, nil
-		}
+	if slices.Contains(okCodes, code) {
+		return resp, nil
 	}
 
 	return resp, &ErrUnexpectedResponseCode{

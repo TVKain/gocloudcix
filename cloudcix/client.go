@@ -3,6 +3,7 @@ package cloudcix
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	gocloudcix "github.com/TVKain/go-cloudcix"
 	tokens "github.com/TVKain/go-cloudcix/cloudcix/membership/tokens"
@@ -21,50 +22,30 @@ var (
 )
 
 // TODO: Need a better way to handle this.
-
-// getApplicationEndpoint constructs the full endpoint for an application.
-// It supports baseEndpoint as a full FQDN (e.g., "membership.dev.cloudcix.net"),
-// a partial domain (e.g., "dev.cloudcix.net"), or even just a hostname/IP.
-// If baseEndpoint already includes the application as a subdomain, it is returned as-is.
-func getApplicationEndpoint(baseEndpoint string, application Application) (string, error) {
-	if baseEndpoint == "" {
-		return "", fmt.Errorf("baseEndpoint cannot be empty")
+// Utility function to construct application endpoints
+// Example: "https://dev.cloudcix.net/"
+// Need a function to construct the full endpoint for an application
+// Example: "https://membership.dev.cloudcix.net/"
+// Example: "https://compute.dev.cloudcix.net/"
+func constructApplicationEndpoint(baseEndpoint string, application Application) string {
+	// Parse the base URL
+	parsed, err := url.Parse(baseEndpoint)
+	if err != nil {
+		// If parsing fails, just return baseEndpoint as fallback
+		return baseEndpoint
 	}
 
-	// Check if the baseEndpoint already contains the application as a subdomain
-	if len(baseEndpoint) > 0 && baseEndpoint[:len(application.name)+1] == application.name+"." {
-		return baseEndpoint, nil
-	}
+	// Insert the app name before the existing host
+	// e.g. dev.cloudcix.net => membership.dev.cloudcix.net
+	newHost := application.name + "." + parsed.Host
 
-	// Construct the full endpoint
-	return fmt.Sprintf("%s.%s", application.name, baseEndpoint), nil
-}
+	// Update the host in the parsed URL
+	parsed.Host = newHost
 
-func setApplicationEndpointProtocol(endpoint string, protocol string) string {
-	return fmt.Sprintf("%s://%s", protocol, endpoint)
-}
+	// Ensure no trailing path remains
+	parsed.Path = ""
 
-// NewClient prepares an unauthenticated ProviderClient instance.
-// Most users will probably prefer using the AuthenticatedClient function
-// instead.
-//
-// This is useful if you wish to explicitly control the version of the identity
-// service that's used for authentication explicitly, for example.
-//
-// A basic example of using this would be:
-//
-//	ao, err := cloudcix.AuthOptionsFromEnv()
-//	provider, err := cloudcix.NewClient(ao.MembershipEndpoint)
-//	client, err := cloudcix.NewMembership(ctx, provider)
-func NewClient(baseEndpoint string) (*gocloudcix.ProviderClient, error) {
-
-	// Use the constructor function instead of manually creating
-	client := gocloudcix.NewProviderClient(baseEndpoint)
-
-	// Additional setup if needed
-	client.BaseEndpoint = baseEndpoint
-
-	return client, nil
+	return parsed.String()
 }
 
 // AuthenticatedClient logs in to an CloudCIX cloud
@@ -76,12 +57,11 @@ func NewClient(baseEndpoint string) (*gocloudcix.ProviderClient, error) {
 //	provider, err := cloudcix.AuthenticatedClient(ctx, ao)
 //	client, err := cloudcix.NewProject(ctx, provider)
 func AuthenticatedClient(ctx context.Context, options gocloudcix.AuthOptions) (*gocloudcix.ProviderClient, error) {
-	client, err := NewClient(options.MembershipEndpoint)
-	if err != nil {
-		return nil, err
-	}
+	client := gocloudcix.NewProviderClient(options.BaseEndpoint)
 
-	err = Authenticate(ctx, client, options)
+	// Set up reauth function - this is safe because ProviderClient handles concurrent reauth attempts
+
+	err := Authenticate(ctx, client, options)
 	if err != nil {
 		return nil, err
 	}
@@ -92,14 +72,19 @@ func AuthenticatedClient(ctx context.Context, options gocloudcix.AuthOptions) (*
 // recent identity service supported at the provided endpoint.
 func Authenticate(ctx context.Context, client *gocloudcix.ProviderClient, options gocloudcix.AuthOptions) error {
 	// Create membership client with proper locking
+
 	membershipClient, err := NewMembership(ctx, client)
 	if err != nil {
 		return fmt.Errorf("failed to create membership client: %w", err)
 	}
 
-	// Set up reauth function - this is safe because ProviderClient handles concurrent reauth attempts
 	client.ReauthFunc = func(ctx context.Context) error {
-		return Authenticate(ctx, client, options)
+		newClient, err := AuthenticatedClient(ctx, options)
+		if err != nil {
+			return fmt.Errorf("failed to re-authenticate: %w", err)
+		}
+		client.SetToken(newClient.GetToken())
+		return nil
 	}
 
 	// Get new token
@@ -124,7 +109,17 @@ func Authenticate(ctx context.Context, client *gocloudcix.ProviderClient, option
 
 func NewMembership(ctx context.Context, client *gocloudcix.ProviderClient) (*gocloudcix.ApplicationClient, error) {
 	// TODO: Handle protocol setting based on client configuration
-	endpoint := setApplicationEndpointProtocol(client.BaseEndpoint, "https")
+	endpoint := constructApplicationEndpoint(client.BaseEndpoint, Membership)
+
+	return &gocloudcix.ApplicationClient{
+		ProviderClient: client,
+		Endpoint:       endpoint,
+	}, nil
+}
+
+func NewCompute(ctx context.Context, client *gocloudcix.ProviderClient) (*gocloudcix.ApplicationClient, error) {
+	// TODO: Handle protocol setting based on client configuration
+	endpoint := constructApplicationEndpoint(client.BaseEndpoint, Compute)
 
 	return &gocloudcix.ApplicationClient{
 		ProviderClient: client,
